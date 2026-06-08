@@ -383,6 +383,26 @@ async function waitForText(page, text, options = {}) {
   return true;
 }
 
+async function savePageState(page) {
+  // Save the page state
+  const state = {
+    html: await page.content(), // Save the HTML content
+    cookies: await page.cookies(), // Save the cookies
+  };
+  return state;
+}
+
+async function loadPageState(page, state) {
+  try {
+    // Load the HTML content
+    await page.setContent(state.html);
+    // Load the cookies
+    await page.setCookie(...state.cookies);
+  } catch (error) {
+    console.log("failed load state");
+  }
+}
+
 // Get appointment
 export async function getAppointment(data, proxy) {
   let usedOficinas = [];
@@ -440,28 +460,35 @@ export async function getAppointment(data, proxy) {
           console.log("Cookie banner click failed");
         }
       }
+      try {
+        await page.evaluate((tramiteCode) => {
+          document.querySelector(`option[value="${tramiteCode}"]`).selected =
+            true; // back to selector
+        }, data["tramite"]);
+        const tramite = String(data["tramite"]);
+        await page.waitForFunction(
+          (value) => document.querySelector(`option[value="${value}"]`),
+          {},
+          tramite,
+        );
+      } catch (error) {
+        sendMessageToGroup(
+          data["owner"],
+          `Tramite not found:\n Provincia: ${data["provinciaLabel"]} \n Tramite: ${data["tramiteLabel"]}`,
+        );
+        continue;
+      }
       await page.evaluate((selector) => {
         const element = document.querySelector(selector);
         if (element) {
           element.scrollIntoView({ block: "center" });
         }
       }, "#btnAceptar");
-      try {
-        await page.evaluate((tramiteCode) => {
-          document.querySelector(`option[value="${tramiteCode}"]`).selected =
-            true; // back to selector
-        }, data["tramite"]);
-      } catch (error) {
-        telegramNotification(
-          `Tramite not found:\n Provincia: ${data["provinciaLabel"]} \n Tramite: ${data["tramiteLabel"]}`,
-        );
-        continue;
-      }
       await page.locator("#btnAceptar").click();
       await Promise.race([
         page.waitForNavigation({ waitUntil: "domcontentloaded" }),
         page.waitForSelector("#btnEntrar", { timeout: 25000 }),
-        page.waitForTimeout(20000),
+        page.waitForTimeout(10000),
       ]);
       // Check title
       let title = await page.title();
@@ -512,12 +539,6 @@ export async function getAppointment(data, proxy) {
       }
       // click continue
       await sleep(3000);
-      await page.evaluate((selector) => {
-        const element = document.querySelector(selector);
-        if (element) {
-          element.scrollIntoView({ block: "center" });
-        }
-      }, "#btnEnviar");
       await page.locator("#btnEnviar").click();
       await Promise.race([
         page.waitForNavigation({ waitUntil: "domcontentloaded" }),
@@ -536,55 +557,85 @@ export async function getAppointment(data, proxy) {
           await page.waitForSelector("#btnEnviar", { timeout: 10 });
           sendMessageToGroup(
             data["owner"],
-            `Data Error of client: ${data["nombre"]} ${data["docId"]}`,
+            `Error in data of client ${data["nombre"]} con ID ${data["docId"]}`,
           );
-          break;
+          return "done";
         } catch (error) {
-          console.log("figureprint detected");
+          console.log("Data search error");
         }
         throw new Error("Error");
       }
+
       //#################################### check if its open #################################
-      await page.evaluate((selector) => {
-        const element = document.querySelector(selector);
-        if (element) {
-          element.scrollIntoView({ block: "center" });
-        }
-      }, "#btnEnviar");
-      await page.locator("#btnEnviar").click();
-      await Promise.race([
-        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-        waitForText(page, "Paso 1 de 5", { timeout: 15000 }),
-        page.waitForTimeout(8000),
-      ]);
-      title = await page.title();
-      if (title === "Request Rejected") {
-        console.log("Fingerprint detected");
-        continue;
-      }
-      await page.waitForSelector("#btnSalir", { timeout: 3000 });
-      try {
-        await page.waitForSelector("#btnSiguiente", { timeout: 2000 }); // Check if it's open
-      } catch (error) {
-        // check if contain text
-        const noDisponibila = await page.evaluate((str) => {
-          return document.body.textContent.includes(str);
-        }, "En este momento no hay citas disponibles.");
-        if (noDisponibila) {
-          throw new Error("En este momento no hay citas disponibles.");
-        }
-        const hasAppointment = await page.evaluate((str) => {
-          return document.body.textContent.includes(str);
-        }, "Lo sentimos, pero has superado el máximo de citas en vigor para este trámite en la provincia seleccionada.");
-        if (hasAppointment) {
-          sendMessageToGroup(
-            data["owner"],
-            `⚠️ Client already has appointment ⚠️\n\n Nombre: ${data["nombre"]} \n Id: ${data["docId"]}`,
+      // Multiple try
+      const state = await savePageState(page);
+      let attempt = 0;
+      while (attempt < 5) {
+        // To adjust
+        attempt += 1;
+        try {
+          await page.evaluate((selector) => {
+            const element = document.querySelector(selector);
+            if (element) {
+              element.scrollIntoView({ block: "center" });
+            }
+          }, "#btnEnviar");
+          await page.locator("#btnEnviar").click();
+          await Promise.race([
+            page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+            waitForText(page, "Paso 1 de 5", { timeout: 15000 }),
+            page.waitForTimeout(8000),
+          ]);
+          title = await page.title();
+          if (title === "Request Rejected") {
+            throw new Error("ABORTED");
+          }
+          // check Paso 1 de 5
+          try {
+            const content = await page.content();
+            if (!content.includes("Paso 1 de 5")) {
+              throw new Error("ABORTED");
+            }
+          } catch (error) {
+            throw new Error("ABORTED");
+          }
+          try {
+            await page.waitForSelector("#btnSiguiente", { timeout: 3000 }); // Check if it's open
+            break;
+          } catch (error) {
+            // check if contain text
+            const noDisponibila = await page.evaluate((str) => {
+              return document.body.textContent.includes(str);
+            }, "En este momento no hay citas disponibles.");
+            if (noDisponibila) {
+              throw new Error("ABORTED");
+            }
+            const hasAppointment = await page.evaluate((str) => {
+              return document.body.textContent.includes(str);
+            }, "Lo sentimos, pero has superado el máximo de citas en vigor para este trámite en la provincia seleccionada.");
+            if (hasAppointment) {
+              sendMessageToGroup(
+                data["owner"],
+                `⚠️ Client already has appointment ⚠️\n\n Nombre: ${data["nombre"]} \n Id: ${data["docId"]}`,
+              );
+              return "done";
+            }
+            throw new Error("ABORTED");
+          }
+        } catch (error) {
+          // to check
+          console.log(error);
+
+          if (error.message === "ABORTED" || attempt > 4) throw error;
+          console.log(
+            `${data["provinciaLabel"]} tramite ${data["tramite"]} closed`,
           );
-          throw new Error("Break");
+          await loadPageState(page, state);
         }
-        throw Error("Failed to load oficina page");
       }
+      // ## keep the process
+      await page.waitForSelector("#btnSalir", { timeout: 1000 });
+      await page.waitForSelector("#btnSiguiente", { timeout: 1000 }); // Check if it's open
       //######################################### select oficina page ###
       const nonEmptyValues = await page.$$eval(
         "#idSede option",
@@ -779,7 +830,7 @@ export async function getAppointment(data, proxy) {
           ];
         await randomLink.click();
         await solveCaptcha(page);
-        await sleep(5000);
+        // await sleep(500); // check this
         //btnSiguiente
         await page.locator("#btnSiguiente").click();
       }
