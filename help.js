@@ -277,6 +277,7 @@ async function launchBrowserWithFingerprint(proxy) {
   const fingerprint = generateFingerprint();
   const newUrl = await proxyChain.anonymizeProxy(proxy);
   const profileDir = "./profiles/profile-" + Math.random();
+  //  executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   const browser = await puppeteer.launch({
     headless: false,
     userDataDir: profileDir,
