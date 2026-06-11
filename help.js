@@ -16,7 +16,7 @@ import languages from "./browser-data/languages.js";
 puppeteer.use(StealthPlugin());
 
 // Get the current working directory
-const owner = "leona"; // sukuna, leona
+const owner = "jaouad"; // sukuna, leona
 const captchaUserId = "jaouadeddadsi2016@gmail.com";
 const captchaApikey = "qlfsQRF3b4swypsVAcnm";
 
@@ -418,7 +418,7 @@ export async function getAppointment(data, proxy) {
     try {
       ({ browser, page, profileDir } =
         await launchBrowserWithFingerprint(proxy));
-      await page.setDefaultNavigationTimeout(20000);
+      await page.setDefaultNavigationTimeout(15000);
       // Block additional resources
       await page.setRequestInterception(true);
       const requestHandler = (request) => {
@@ -479,6 +479,7 @@ export async function getAppointment(data, proxy) {
         );
         continue;
       }
+      await sleep(1500);
       await page.evaluate((selector) => {
         const element = document.querySelector(selector);
         if (element) {
@@ -510,7 +511,7 @@ export async function getAppointment(data, proxy) {
       await Promise.race([
         page.waitForNavigation({ waitUntil: "domcontentloaded" }),
         page.waitForSelector("#btnEnviar", { timeout: 25000 }),
-        page.waitForTimeout(20000),
+        page.waitForTimeout(10000),
       ]);
       title = await page.title();
       if (title === "Request Rejected") {
@@ -569,74 +570,85 @@ export async function getAppointment(data, proxy) {
 
       //#################################### check if its open #################################
       // Multiple try
-      const state = await savePageState(page);
-      let attempt = 0;
-      while (attempt < 5) {
-        // To adjust
-        attempt += 1;
-        try {
-          await page.evaluate((selector) => {
-            const element = document.querySelector(selector);
-            if (element) {
-              element.scrollIntoView({ block: "center" });
-            }
-          }, "#btnEnviar");
-          await page.locator("#btnEnviar").click();
-          await Promise.race([
-            page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-            waitForText(page, "Paso 1 de 5", { timeout: 15000 }),
-            page.waitForTimeout(8000),
-          ]);
-          title = await page.title();
-          if (title === "Request Rejected") {
-            throw new Error("ABORTED");
-          }
-          // check Paso 1 de 5
-          try {
-            const content = await page.content();
-            if (!content.includes("Paso 1 de 5")) {
-              throw new Error("ABORTED");
-            }
-          } catch (error) {
-            throw new Error("ABORTED");
-          }
-          try {
-            await page.waitForSelector("#btnSiguiente", { timeout: 3000 }); // Check if it's open
-            break;
-          } catch (error) {
-            // check if contain text
-            const noDisponibila = await page.evaluate((str) => {
-              return document.body.textContent.includes(str);
-            }, "En este momento no hay citas disponibles.");
-            if (noDisponibila) {
-              throw new Error("ABORTED");
-            }
-            const hasAppointment = await page.evaluate((str) => {
-              return document.body.textContent.includes(str);
-            }, "Lo sentimos, pero has superado el máximo de citas en vigor para este trámite en la provincia seleccionada.");
-            if (hasAppointment) {
-              sendMessageToGroup(
-                data["owner"],
-                `⚠️ Client already has appointment ⚠️\n\n Nombre: ${data["nombre"]} \n Id: ${data["docId"]}`,
-              );
-              return "done";
-            }
-            throw new Error("ABORTED");
-          }
-        } catch (error) {
-          // to check
-          console.log(error);
-
-          if (error.message === "ABORTED" || attempt > 4) throw error;
-          console.log(
-            `${data["provinciaLabel"]} tramite ${data["tramite"]} closed`,
+      await page.evaluate((selector) => {
+        const element = document.querySelector(selector);
+        if (element) {
+          element.scrollIntoView({ block: "center" });
+        }
+      }, "#btnEnviar");
+      await page.locator("#btnEnviar").click();
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        waitForText(page, "Paso 1 de 5", { timeout: 15000 }),
+        page.waitForTimeout(8000),
+      ]);
+      title = await page.title();
+      if (title === "Request Rejected") {
+        continue;
+      }
+      // check Paso 1 de 5
+      try {
+        const content = await page.content();
+        if (!content.includes("Paso 1 de 5")) {
+          // send telegrame message
+          sendMessageToGroup(
+            data["owner"],
+            `Client ${data["nombre"]} with Id ${data["docId"]} exceded number of try.`,
           );
-          await loadPageState(page, state);
+          try {
+            page?.off("request", requestHandler);
+            await browser?.close();
+            await deleteFolderRecursive(profileDir);
+          } catch (error) {}
+          return "done";
+        }
+      } catch (error) {
+        // send telegrame message
+        sendMessageToGroup(
+          data["owner"],
+          `Client ${data["nombre"]} with Id ${data["docId"]} exceded number of try.`,
+        );
+        try {
+          page?.off("request", requestHandler);
+          await browser?.close();
+          await deleteFolderRecursive(profileDir);
+        } catch (error) {}
+        return "done";
+      }
+      // refresh
+      let attempt = 0;
+      while (attempt < 10) {
+        try {
+          await page.waitForSelector("#btnSiguiente", { timeout: 4000 }); // Check if it's open
+          break;
+        } catch (error) {
+          const hasAppointment = await page.evaluate((str) => {
+            return document.body.textContent.includes(str);
+          }, "Lo sentimos, pero has superado el máximo de citas en vigor para este trámite en la provincia seleccionada.");
+          if (hasAppointment) {
+            sendMessageToGroup(
+              data["owner"],
+              `⚠️ Client already has appointment ⚠️\n\n Nombre: ${data["nombre"]} \n Id: ${data["docId"]}`,
+            );
+            try {
+              page?.off("request", requestHandler);
+              await browser?.close();
+              await deleteFolderRecursive(profileDir);
+            } catch (error) {}
+            return "done";
+          }
+          // await sleep(1000);
+          attempt += 1;
+          await page.reload();
+          const content = await page.content();
+          if (!content.includes("Paso 1 de 5")) {
+            throw new Error("ABORT ABORT");
+          }
         }
       }
       // ## keep the process
-      await page.waitForSelector("#btnSalir", { timeout: 1000 });
-      await page.waitForSelector("#btnSiguiente", { timeout: 1000 }); // Check if it's open
+      await page.waitForSelector("#btnSalir", { timeout: 100 });
+      await page.waitForSelector("#btnSiguiente", { timeout: 100 }); // Check if it's open
       //######################################### select oficina page ###
       const nonEmptyValues = await page.$$eval(
         "#idSede option",
@@ -865,12 +877,10 @@ export async function getAppointment(data, proxy) {
         },
         { timeout: 300000 }, // 5 minutes
       );
-      await sleep(40000); // 1 minute to finish the process
-      console.log("Done");
+      console.log("Done Done Done");
       return "done";
     } catch (error) {
-      console.log(error);
-    } finally {
+      // console.log(error);
       page?.off("request", requestHandler);
       await browser?.close();
       await deleteFolderRecursive(profileDir);
