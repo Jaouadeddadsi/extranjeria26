@@ -8,7 +8,7 @@ import {
 } from "./help.js";
 
 // Max concurant worker
-const maxConcurrant = 2;
+const maxConcurrant = 4;
 
 async function main() {
   // clear profiles

@@ -16,7 +16,7 @@ import languages from "./browser-data/languages.js";
 puppeteer.use(StealthPlugin());
 
 // Get the current working directory
-const owner = "jaouad"; // sukuna, leona
+const owner = "leona"; // sukuna, leona
 const captchaUserId = "jaouadeddadsi2016@gmail.com";
 const captchaApikey = "qlfsQRF3b4swypsVAcnm";
 
@@ -105,7 +105,7 @@ export function getEmail() {
   return `${randomString}@grr.la`;
 }
 
-export function sendMessageToGroup(owner, message) {
+export async function sendMessageToGroup(owner, message) {
   const token = "8064000963:AAFgfMVj-AP_SaNfMAo_ghZVCsYhqGquUsM";
   const chadIds = {
     sukuna: "-1002226967850",
@@ -126,6 +126,7 @@ export function sendMessageToGroup(owner, message) {
   }
   return;
 }
+
 
 export function getRandomItem(currentList, originalList) {
   if (currentList.length === 0) {
@@ -280,6 +281,7 @@ async function launchBrowserWithFingerprint(proxy) {
   //  executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   const browser = await puppeteer.launch({
     headless: false,
+    executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     userDataDir: profileDir,
     ignoreHTTPSErrors: true,
     args: [
@@ -473,7 +475,7 @@ export async function getAppointment(data, proxy) {
           tramite,
         );
       } catch (error) {
-        sendMessageToGroup(
+        await sendMessageToGroup(
           data["owner"],
           `Tramite not found:\n Provincia: ${data["provinciaLabel"]} \n Tramite: ${data["tramiteLabel"]}`,
         );
@@ -557,7 +559,7 @@ export async function getAppointment(data, proxy) {
       } catch (error) {
         try {
           await page.waitForSelector("#btnEnviar", { timeout: 10 });
-          sendMessageToGroup(
+          await sendMessageToGroup(
             data["owner"],
             `Error in data of client ${data["nombre"]} con ID ${data["docId"]}`,
           );
@@ -591,7 +593,7 @@ export async function getAppointment(data, proxy) {
         const content = await page.content();
         if (!content.includes("Paso 1 de 5")) {
           // send telegrame message
-          sendMessageToGroup(
+          await sendMessageToGroup(
             data["owner"],
             `Client ${data["nombre"]} with Id ${data["docId"]} exceded number of try.`,
           );
@@ -604,7 +606,7 @@ export async function getAppointment(data, proxy) {
         }
       } catch (error) {
         // send telegrame message
-        sendMessageToGroup(
+        await sendMessageToGroup(
           data["owner"],
           `Client ${data["nombre"]} with Id ${data["docId"]} exceded number of try.`,
         );
@@ -626,7 +628,7 @@ export async function getAppointment(data, proxy) {
             return document.body.textContent.includes(str);
           }, "Lo sentimos, pero has superado el máximo de citas en vigor para este trámite en la provincia seleccionada.");
           if (hasAppointment) {
-            sendMessageToGroup(
+            await sendMessageToGroup(
               data["owner"],
               `⚠️ Client already has appointment ⚠️\n\n Nombre: ${data["nombre"]} \n Id: ${data["docId"]}`,
             );
@@ -661,7 +663,7 @@ export async function getAppointment(data, proxy) {
       let oficinas = mergeOficinas(nonEmptyValues, data["oficina"]);
       oficinas = oficinas.filter((item) => !usedOficinas.includes(item));
       if (oficinas.length === 0) {
-        sendMessageToGroup(
+        await sendMessageToGroup(
           data["owner"],
           `Out of range oficina, nonEmpty ${nonEmptyValues}`,
         );
@@ -697,7 +699,7 @@ export async function getAppointment(data, proxy) {
       // ###################################### fill in phone number and email
       let phone = await getFirstNumber();
       if (!phone) {
-        sendMessageToGroup(
+        await sendMessageToGroup(
           data["owner"],
           "Can't get phone number check credit",
         );
@@ -748,7 +750,7 @@ export async function getAppointment(data, proxy) {
       } catch (error) {
         phone = null;
         console.log("Error phone number");
-        sendMessageToGroup(data["owner"], `Phone number: ${phone} is blocked`);
+        await sendMessageToGroup(data["owner"], `Phone number: ${phone} is blocked`);
         continue;
       }
       // select appointment
@@ -865,7 +867,7 @@ export async function getAppointment(data, proxy) {
       }
       // check it load next page
       await page.waitForSelector("#btnConfirmar", { timeout: 5000 });
-      sendMessageToGroup(
+      await sendMessageToGroup(
         data["owner"],
         `🔔Cita encontrada🔔\n\n📝 Tramite: ${data["tramiteLabel"]}\n\n📍CITADO: ${data["nombre"]}  - ${data["docId"]}\n\n🏢 Phone: ${phone}\n\n Email: ${email}`,
       );
